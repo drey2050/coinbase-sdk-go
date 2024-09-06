@@ -6,24 +6,20 @@ those capabilities for the Go SDK:
 ## Developer Wallets
 
 | Concept       | Base-Sepolia | Base-Mainnet | Ethereum-Holesky | Ethereum-Mainnet |
-| ------------- | :----------: | :----------: | :--------------: | :--------------: |
-| Addresses     |      ❌      |      ❌      |        ❌        |        ❌        |
-| Send          |      ❌      |      ❌      |        ❌        |        ❌        |
-| Trade         |      ❌      |      ❌      |        ❌        |        ❌        |
-| Faucet        |      ❌      |      ❌      |        ❌        |        ❌        |
-| Server-Signer |      ❌      |      ❌      |        ❌        |        ❌        |
-| Stake [^1]    |      ❌      |      ❌      |        ❌        |        ❌        |
-
-[^1]: Currently only available for Shared ETH Staking.
+|---------------|:------------:|:------------:|:----------------:|:----------------:|
+| Addresses     |      ❌       |      ❌       |        ❌         |        ❌         |
+| Send          |      ❌       |      ❌       |        ❌         |        ❌         |
+| Trade         |      ❌       |      ❌       |        ❌         |        ❌         |
+| Faucet        |      ❌       |      ❌       |        ❌         |        ❌         |
+| Server-Signer |      ❌       |      ❌       |        ❌         |        ❌         |
+| Stake         |      ❌       |      ❌       |        ✅         |        ✅         |
 
 ## End-User Wallets
 
-| Concept            | Base-Sepolia | Base-Mainnet | Ethereum-Holesky | Ethereum-Mainnet |
-| ------------------ | :----------: | :----------: | :--------------: | :--------------: |
-| External Addresses |      ❌      |      ❌      |        ❌        |        ❌        |
-| Stake [^2]         |      ❌      |      ❌      |        ❌        |        ❌        |
-
-[^2]: Dedicated ETH Staking is currently only available on Testnet (Ethereum-Holesky).
+| Concept            | Base-Sepolia | Base-Mainnet | Ethereum-Holesky | Ethereum-Mainnet | Solana-Devnet |
+|--------------------|:------------:|:------------:|:----------------:|:----------------:|:-------------:|
+| External Addresses |      ❌       |      ❌       |        ❌         |        ❌         |       ❌       |
+| Stake              |      ❌       |      ❌       |        ✅         |        ✅         |       ✅       |
 
 ## Testnet vs. Mainnet
 

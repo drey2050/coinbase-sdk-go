@@ -2,71 +2,178 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"time"
 
-	api "github.com/coinbase/coinbase-sdk-go/gen/client"
+	"github.com/btcsuite/btcutil/base58"
 	"github.com/coinbase/coinbase-sdk-go/pkg/coinbase"
+	bin "github.com/gagliardetto/binary"
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
+)
+
+var (
+	networkID     = "solana-devnet"
+	walletAddress = "9NL2SkpcsdyZwsG8NmHGNra4i4NSyKbJTVd9fUQ7kJHR"
+	amount        = big.NewFloat(0.1)
+	rpcURL        = "SOLANA_DEVNET_RPC_URL"
 )
 
 func main() {
 	ctx := context.Background()
+
 	client, err := coinbase.NewClient(
-		coinbase.WithAPIKeyFromJSON(os.Args[1]),
+		coinbase.WithAPIKeyFromJSON("/Users/rohit/code/cb/staking/.coinbase_cloud_api_key_dev.json"),
+		coinbase.WithBaseURL("http://localhost:8004"),
 	)
 	if err != nil {
 		log.Fatalf("error creating coinbase client: %v", err)
 	}
 
-	address := coinbase.NewExternalAddress("ethereum-holesky", "0x57a063e1df096aaA6b2068C3C7FE6Ac4BC3c4F58")
-	op, err := client.BuildStakeOperation(ctx, big.NewFloat(0.0001), coinbase.Eth, address)
+	address := coinbase.NewExternalAddress(networkID, walletAddress)
+
+	balance, err := client.GetStakeableBalance(ctx, coinbase.Sol, address)
+	if err != nil {
+		log.Fatalf("error getting balance: %v", err)
+	}
+
+	log.Printf("Stakeable balance: %s\n\n", balance.Amount().String())
+
+	stakingOperation, err := client.BuildStakeOperation(ctx, amount, coinbase.Sol, address)
 	if err != nil {
 		log.Fatalf("error building staking operation: %v", err)
 	}
-	log.Printf("staking operation ID: %s\n", op.ID())
-	for _, transaction := range op.Transactions() {
-		log.Printf("staking operation Transaction: %+v\n", transaction)
+
+	log.Printf("Staking operation ID: %s\n\n", stakingOperation.ID())
+
+	for _, transaction := range stakingOperation.Transactions() {
+		log.Printf("Tx unsigned payload: %s\n\n", transaction.UnsignedPayload())
+
+		signedTx, err := signSolTransaction(transaction.UnsignedPayload(), []string{os.Getenv("SOL_PRIVATE_KEY")})
+		if err != nil {
+			log.Fatalf("error signing transaction: %v", err)
+		}
+
+		log.Printf("Signed tx: %s\n\n", signedTx)
+
+		sig, err := broadcastSolTransaction(ctx, signedTx)
+		if err != nil {
+			log.Fatalf("error broadcasting transaction: %v", err)
+		}
+
+		log.Printf("Broadcasted tx: %s\n\n", getTxLink(stakingOperation.NetworkID(), sig))
+	}
+}
+
+func signSolTransaction(unsignedTx string, privateKeys []string) (string, error) {
+	if len(privateKeys) == 0 {
+		return "", fmt.Errorf("need to pass at least one private key")
 	}
 
-	address = coinbase.NewExternalAddress(
-		"ethereum-mainnet",
-		"0xddb00798137e9e7cc89f1e9679e6ce6ea580b8f9",
-	)
+	signers := make([]solana.PrivateKey, 0, len(privateKeys))
 
-	rewards, err := client.ListStakingRewards(
-		ctx,
-		coinbase.Eth,
-		[]coinbase.Address{*address},
-		time.Now().Add(-7*24*time.Hour),
-		time.Now(),
-		api.STAKINGREWARDFORMAT_USD,
-	)
+	for _, privateKey := range privateKeys {
+		signer, err := solana.PrivateKeyFromBase58(privateKey)
+		if err != nil {
+			return "", fmt.Errorf("error getting private key: %w", err)
+		}
+
+		signers = append(signers, signer)
+	}
+
+	data := base58.Decode(unsignedTx)
+
+	// parse transaction
+	tx, err := solana.TransactionFromDecoder(bin.NewBinDecoder(data))
 	if err != nil {
-		log.Fatalf("error listing rewards: %v", err)
+		return "", err
 	}
 
-	for _, reward := range rewards {
-		println(reward.ToJSON())
+	// clear signatures: https://github.com/gagliardetto/solana-go/issues/186
+	tx.Signatures = nil
+
+	if _, err = tx.Sign(func(key solana.PublicKey) *solana.PrivateKey {
+		for _, candidate := range signers {
+			if candidate.PublicKey().Equals(key) {
+				return &candidate
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("error signing transaction: %w", err)
 	}
 
-	address = coinbase.NewExternalAddress(
-		"ethereum-mainnet",
-		"0xadbf3776d60b3f9dd30cb3257b50583898745deb40cb6cb842120753bf055f6c3863e0f5bdb5c403d9aa5a275ce165e8",
-	)
-	balances, err := client.ListHistoricalStakingBalances(
-		ctx,
-		coinbase.Eth,
-		address,
-		time.Now().Add(-7*24*time.Hour),
-		time.Now(),
-	)
+	marshaledTx, err := tx.MarshalBinary()
 	if err != nil {
-		log.Fatalf("error listing balances: %v", err)
+		return "", fmt.Errorf("error marshaling transaction: %w", err)
 	}
 
-	for _, balance := range balances {
-		println(balance.String())
+	base58EncodedSignedTx := base58.Encode(marshaledTx)
+
+	return base58EncodedSignedTx, nil
+}
+
+func broadcastSolTransaction(ctx context.Context, signedTx string) (string, error) {
+	var (
+		sig solana.Signature
+		err error
+	)
+
+	cluster := rpc.Cluster{
+		Name: "solana-staking-demo-rpc",
+		RPC:  rpcURL,
 	}
+
+	rpcClient := rpc.New(cluster.RPC)
+
+	data := base58.Decode(signedTx)
+
+	// parse transaction
+	tx, err := solana.TransactionFromDecoder(bin.NewBinDecoder(data))
+	if err != nil {
+		return "", err
+	}
+
+	opts := rpc.TransactionOpts{
+		SkipPreflight:       false,
+		PreflightCommitment: rpc.CommitmentFinalized,
+	}
+
+	fmt.Println("Sending transaction...")
+
+	maxRetries := 20
+
+	for maxRetries > 0 {
+		fmt.Printf("Trying again [%d] Sending transaction...\n", 21-maxRetries)
+
+		sig, err = rpcClient.SendTransactionWithOpts(ctx, tx, opts)
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			maxRetries--
+
+			continue
+		}
+
+		break
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to send transaction: %w", err)
+	}
+
+	return sig.String(), nil
+}
+
+func getTxLink(networkID, signature string) string {
+	if networkID == "solana-mainnet" {
+		return fmt.Sprintf("https://explorer.solana.com/tx/%s", signature)
+	} else if networkID == "solana-devnet" {
+		return fmt.Sprintf("https://explorer.solana.com/tx/%s?cluster=devnet", signature)
+	}
+
+	return ""
 }
